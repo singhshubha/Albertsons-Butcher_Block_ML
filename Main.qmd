@@ -352,19 +352,13 @@ shrink_modeling_data <- meat_data |>
     `Weekly Labor Hours`, Division, Banner, ST
   ) |>
   drop_na() |>
-  mutate(performance_category = as.factor(performance_category))
+  mutate(meat_data$performance_category = as.factor(performance_category))
 
 # Create data splits
 set.seed(2024)
 shrink_split <- initial_split(shrink_modeling_data, prop = 0.75, strata = Division)
 shrink_train <- training(shrink_split)
 shrink_test <- testing(shrink_split)
-
-shrink_train <- shrink_train |>
-  mutate(meat_data$performance_category = as.factor(meat_data$performance_category))
-
-shrink_test <- shrink_test |>
-  mutate(meat_data$performance_category = as.factor(meat_data$performance_category))
 
 # Create preprocessing recipe
 shrink_recipe <- recipe(`Meat Shrink` ~ ., data = shrink_train) |>
@@ -432,7 +426,7 @@ shrink_predictions <- predict(final_shrink_fit, shrink_test) |>
 
 
 
-
+metrics <- metric_set(rmse, rsq, mae)
 # Calculate metrics
 shrink_metrics <- shrink_predictions |>
   metrics(truth = `Meat Shrink`, estimate = .pred)
@@ -448,7 +442,29 @@ shrink_metrics |>
     )
   ) |>
   kable(col.names = c("Metric", "Estimator", "Value"))
+
+
+# View actual vs predicted shrink values for the test set
+shrink_predictions |> 
+  select(`Store ID`, `Meat Shrink`, .pred, performance_category) |> 
+  arrange(desc(`Meat Shrink`)) |> 
+  head(10)
+
+
+# Plot actual vs predicted
+ggplot(shrink_predictions, aes(x = `Meat Shrink`, y = .pred)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(linetype = "dashed", color = "red") +
+  labs(
+    title = "Actual vs Predicted Meat Shrink",
+    x = "Actual Shrink",
+    y = "Predicted Shrink"
+  ) +
+  theme_minimal()
+
 ```
+
+\
 
 ## Model 2: Performance Classification
 
