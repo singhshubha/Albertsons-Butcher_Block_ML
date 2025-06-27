@@ -473,23 +473,24 @@ ggplot(shrink_predictions, aes(x = `Meat Shrink`, y = .pred)) +
 class_modeling_data <- meat_data |>
   select(
     # Target
-    Performance_Category,
+    performance_category,
     # Features
     `Meat Sales`, `Meat Shrink`, `Meat Dept Shrink Pct`,
     `Meat Markdown`, `Meat Markdown Quantity`,
     `Weekly Labor Hours`, Division, Banner, ST
   ) |>
-  drop_na()
+  drop_na()  |>
+  mutate(performance_category = as.factor(performance_category))
 
 # Create splits
 set.seed(2024)
 class_split <- initial_split(class_modeling_data, prop = 0.75, 
-                            strata = Performance_Category)
+                            strata = performance_category)
 class_train <- training(class_split)
 class_test <- testing(class_split)
 
 # Create recipe
-class_recipe <- recipe(Performance_Category ~ ., data = class_train) |>
+class_recipe <- recipe(performance_category ~ ., data = class_train) |>
   step_novel(all_nominal_predictors()) |>
   step_dummy(all_nominal_predictors()) |>
   step_zv(all_predictors()) |>
@@ -502,7 +503,7 @@ xgb_class_spec <- boost_tree(
   min_n = 10,
   loss_reduction = 0.01,
   sample_size = 0.8,
-  mtry = 0.8,
+  mtry = 1,
   learn_rate = 0.01
 ) |>
   set_engine("xgboost", nthread = 4) |>
@@ -522,13 +523,14 @@ class_predictions <- predict(class_fit, class_test) |>
   bind_cols(predict(class_fit, class_test, type = "prob")) |>
   bind_cols(class_test)
 
+metrics <- metric_set(accuracy, recall)
 # Calculate metrics
 class_metrics <- class_predictions |>
-  metrics(truth = Performance_Category, estimate = .pred_class)
+  metrics(truth = performance_category, estimate = .pred_class)
 
 # Confusion matrix
 conf_mat <- class_predictions |>
-  conf_mat(truth = Performance_Category, estimate = .pred_class)
+  conf_mat(truth = performance_category, estimate = .pred_class)
 
 # Display results
 cat("\n=== CLASSIFICATION MODEL PERFORMANCE ===\n")
