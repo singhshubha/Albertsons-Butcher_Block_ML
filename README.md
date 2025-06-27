@@ -39,5 +39,5 @@ This project applies machine learning and data analysis techniques to classify s
 - Department
 
 
-##This is currently an ongoing project!!
+##  This is currently an ongoing project
 - Updates as I go
