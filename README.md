@@ -37,3 +37,6 @@ This project applies machine learning and data analysis techniques to classify s
 - Boxplots of Sales, Shrink %, and Labor by tier
 - Scatterplots of Sales vs Shrink and Sales/Labor efficiency
 - Department
+
+
+- This is currently an ongoing project!!
