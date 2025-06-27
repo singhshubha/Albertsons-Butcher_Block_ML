@@ -1,0 +1,227 @@
+---
+title: "Store Profitability ML Project Proposal"
+author: "Your Name"
+format:
+  html:
+    code-fold: true
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+---
+
+## Introduction
+
+This project analyzes grocery store performance to **predict profitability** using features like sales, shrink, markdowns, and labor investment. We define profitability based on weekly performance metrics and apply machine learning models (notably XGBoost) to classify store profitability and understand key influencing variables through VIP analysis.
+
+## Our Goal
+
+## Setup
+
+```{r}
+#| message: false
+#| warning: false
+#| paged-print: false
+library(readr)
+library(tidyverse)
+
+library(dplyr)
+library(tidymodels)
+library(janitor)
+library(vip)
+library(knitr)
+library(xgboost)
+```
+
+## Load Data
+
+```{r}
+#| message: false
+#| warning: false
+# Load the dataset
+data <- read_csv("~/Intern_proposal/sample data.csv") 
+meat_data <- data |>
+  select(`Store ID`, Division, `District #`, Banner, `Street Address`, City, ST, ZIP, County,  `Meat Sales`, `Total Sales`, `Meat Shrink`, `Total Shrink`, `Meat Dept Shrink Pct`, `Meat Pct of Total Shrink`, `Meat Butcher Block`, `Total Butcher Block Length`, `Meat Markdown`,	`Meat Markdown Quantity`, `Weekly Labor Hours`)
+
+seafood_data <- data |>
+  select(`Store ID`, Division, `District #`, Banner, `Street Address`, City, ST, ZIP, County,  `Seafood Sales`, `Total Sales`, `Seafood Shrink`, `Total Shrink`, `Seafood Dept Shrink Pct`, `Seafood Pct of Total Shrink`, `Seafood Butcher Block`, `Total Butcher Block Length`, `Seafood Markdown`,	`Seafood Markdown Quantity`, `Weekly Labor Hours`)
+
+# Preview structure
+head(meat_data) |> kable()
+head(seafood_data) |> kable()
+
+```
+
+## Data cleaning
+
+```{r}
+# Convert yearly variables into weekly where applicable
+meat_data <- meat_data |>
+  mutate(
+    `Meat Sales` = `Meat Sales` / 52,
+    `Meat Shrink` = `Meat Shrink` / 52,
+    `Total Sales` = `Total Sales` / 52,
+    `Total Shrink` = `Total Shrink` / 52,
+    `Meat Markdown` = `Meat Markdown` / 52,
+    `Meat Markdown Quantity` = `Meat Markdown Quantity` / 52
+  )
+
+
+# Define columns to exclude from numeric conversion
+exclude_cols <- c("Division", "District #", "Banner", "Street Address", 
+                  "City", "ST", "County", "Profit_Category")
+
+# Convert all other columns to numeric in meat_data
+meat_data <- meat_data |>
+  mutate(across(
+    .cols = where(~ !any(names(meat_data) %in% exclude_cols) & is.character(.) | is.factor(.)),
+    .fns = ~ suppressWarnings(as.numeric(.)),
+    .names = "{.col}"
+  ))
+
+# Alternative approach: more robust (recommended)
+meat_data <- meat_data |>
+  mutate(across(
+    .cols = setdiff(names(meat_data), exclude_cols),
+    .fns = ~ suppressWarnings(as.numeric(.))
+  ))
+
+# Repeat for seafood_data
+seafood_data <- seafood_data |>
+  mutate(across(
+    .cols = setdiff(names(seafood_data), exclude_cols),
+    .fns = ~ suppressWarnings(as.numeric(.))
+  ))
+
+
+seafood_data <- seafood_data |>
+  mutate(
+    `Seafood Sales` = `Seafood Sales` / 52,
+    `Seafood Shrink` = `Seafood Shrink` / 52,
+    `Total Sales` = `Total Sales` / 52,
+    `Total Shrink` = `Total Shrink` / 52,
+    `Seafood Markdown` = `Seafood Markdown` / 52,
+    `Seafood Markdown Quantity` = `Seafood Markdown Quantity` / 52
+  )
+meat_data <- meat_data |>
+  mutate(Profit_Category = case_when(
+    `Meat Sales` > 3000 & `Meat Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
+    `Meat Sales` > 1850 & `Meat Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
+    `Meat Sales` > 1000 & `Meat Dept Shrink Pct` < 0.06 & `Weekly Labor Hours` >= 27 ~ "Low",
+    TRUE ~ "Unprofitable"
+  )) |>
+  mutate(Profit_Category = factor(Profit_Category))
+
+seafood_data <- seafood_data |>
+  mutate(Profit_Category = case_when(
+    `Seafood Sales` > 3000 & `Seafood Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
+    `Seafood Sales` > 1850 & `Seafood Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
+    `Seafood Sales` > 1000 & `Seafood Dept Shrink Pct` < 0.06 & `Weekly Labor Hours` >= 27 ~ "Low",
+    TRUE ~ "Unprofitable"
+  )) |>
+  mutate(Profit_Category = factor(Profit_Category))
+
+head(meat_data) |> kable()
+head(seafood_data) |> kable()
+```
+
+## Exploratory data analysis (Data Viz)
+
+#### Weekly Sales vs Shrink (Losses)
+
+```{r}
+ggplot(meat_data, aes(x = `Meat Sales`, y = `Meat Shrink`)) +
+  geom_point(color = "firebrick", alpha = 0.7) +
+  labs(x = "Weekly Meat Sales ($)", y = "Weekly Shrink ($)") +
+  theme_minimal()
+```
+
+#### Weekly Shrink % Distribution for Stores
+
+```{r}
+ggplot(meat_data, aes(x = `Meat Dept Shrink Pct`)) +
+  geom_histogram(fill = "darkorange", bins = 25) +
+  labs(x = "Shrink %", y = "Number of Stores") +
+  theme_minimal()
+```
+
+#### Markdown vs Shrink Impact
+
+```{r}
+ggplot(meat_data, aes(x = `Meat Markdown`, y = `Meat Shrink`)) +
+  geom_point(color = "steelblue") +
+  labs(x = "Weekly Markdown ($)", y = "Weekly Shrink ($)") +
+  theme_minimal()
+```
+
+#### Weekly Labor Hours vs Weekly Sales
+
+```{r}
+ggplot(meat_data, aes(x = `Weekly Labor Hours`, y = `Meat Sales`)) +
+  geom_point(color = "seagreen") +
+  labs(x = "Labor Hours (Weekly)", y = "Meat Sales ($)") +
+  theme_minimal()
+```
+
+## Processing
+
+### Split and recipe
+
+```{r}
+set.seed(123)
+data_split <- initial_split(meat_data, prop= 0.6, strata = Profit_Category)
+train_data <- training(data_split)
+test_data <- testing(data_split)
+
+profit_recipe <- recipe(Profit_Category ~ 
+                        `Meat Sales` + 
+                        `Meat Dept Shrink Pct` + 
+                        `Weekly Labor Hours` +
+                        `Meat Markdown` +
+                        `Meat Butcher Block`,
+                      data = train_data) |>
+  step_normalize(all_numeric_predictors()) |>
+  step_zv(all_predictors())
+
+```
+
+```{r}
+xgb_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  min_n = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune(),
+  learn_rate = tune()
+) |>
+  set_engine("xgboost") |>
+  set_mode("classification")
+
+# Set up workflow
+xgb_wf <- workflow() |>
+  add_recipe(profit_recipe) |>
+  add_model(xgb_spec)
+
+# Create cross-validation folds
+folds <- vfold_cv(train_data, v = 5, strata = Profit_Category)
+
+# Tune hyperparameters
+set.seed(123)
+xgb_res <- tune_grid(
+  xgb_wf,
+  resamples = folds,
+  grid = 20,
+  metrics = metric_set(accuracy, roc_auc),
+  control = control_grid(save_pred = TRUE)
+)
+
+# Select best model
+best_auc <- select_best(xgb_res, "accuracy")
+final_xgb <- finalize_workflow(xgb_wf, best_auc)
+
+# Fit final model
+final_fit <- fit(final_xgb, train_data)
+
+```
+
+\
