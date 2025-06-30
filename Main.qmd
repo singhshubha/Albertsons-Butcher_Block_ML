@@ -41,7 +41,7 @@ library(xgboost)        # Gradient boosting
 library(patchwork)      # Combine plots
 library(knitr)          # Tables
 library(scales)         # Number formatting
-
+library(gridExtra)
 library(dplyr)
 library(ggplot2)
 library(scales)
@@ -292,7 +292,7 @@ create_metric_plots(meat_data, "Meat Sales", "Meat Dept Shrink Pct")
 ```{r scatter-analysis}
 #| fig-height: 8
 
-# Create performance scatter plot
+# Create a performance scatter plot
 create_performance_scatter <- function(df, sales_col, shrink_col, dept) {
   # Calculate sales per labor hour
   df <- df |>
@@ -647,7 +647,7 @@ COST_PER_FOOT_SEAFOOD <- 200
 
 ```{r butcher-block-data-prep}
 # Prepare butcher block analysis data
-butcher_data <- data %>%
+butcher_data <- data |>
   select(
     # Identifiers
     `Store ID`, Division, `District #`, Banner, City, ST,
@@ -659,14 +659,14 @@ butcher_data <- data %>%
     `Meat Butcher Block`, `Seafood Butcher Block`,
     # Operational metrics
     `Meat Markdown`, `Seafood Markdown`, `Weekly Labor Hours`
-  ) %>%
+  ) |>
   # Convert to weekly metrics
   mutate(
     across(contains(c("Sales", "Shrink", "Markdown")), ~ . / 52),
     # Clean butcher block lengths
     `Meat Butcher Block` = as.numeric(`Meat Butcher Block`),
     `Seafood Butcher Block` = as.numeric(`Seafood Butcher Block`)
-  ) %>%
+  ) |>
   # Filter out invalid data
   filter(
     !is.na(`Meat Butcher Block`),
@@ -675,7 +675,7 @@ butcher_data <- data %>%
     `Seafood Butcher Block` > 0,
     !is.na(`Meat Sales`),
     !is.na(`Seafood Sales`)
-  ) %>%
+  ) |>
   # Calculate efficiency metrics
   mutate(
     # Sales per foot of butcher block
@@ -718,7 +718,7 @@ head(butcher_data)
 
 ```{r butcher-block-eda}
 # Exploratory analysis of butcher block utilization
-library(gridExtra)
+
 
 p1 <- ggplot(butcher_data, aes(x = `Meat Butcher Block`, y = Meat_Sales_per_Foot, 
                                color = meat_performance)) +
@@ -755,7 +755,7 @@ grid.arrange(p1, p2, ncol = 1)
 
 ```{r efficiency-analysis}
 # Analyze efficiency patterns by current length
-efficiency_summary <- butcher_data %>%
+efficiency_summary <- butcher_data |>
   mutate(
     Meat_Length_Category = cut(
       `Meat Butcher Block`,
@@ -770,8 +770,8 @@ efficiency_summary <- butcher_data %>%
   )
 
 # Meat efficiency by length category
-meat_efficiency <- efficiency_summary %>%
-  group_by(Meat_Length_Category) %>%
+meat_efficiency <- efficiency_summary |>
+  group_by(Meat_Length_Category) |>
   summarise(
     Store_Count = n(),
     Avg_Sales_per_Foot = mean(Meat_Sales_per_Foot, na.rm = TRUE),
@@ -782,8 +782,8 @@ meat_efficiency <- efficiency_summary %>%
   )
 
 # Seafood efficiency by length category
-seafood_efficiency <- efficiency_summary %>%
-  group_by(Seafood_Length_Category) %>%
+seafood_efficiency <- efficiency_summary |>
+  group_by(Seafood_Length_Category) |>
   summarise(
     Store_Count = n(),
     Avg_Sales_per_Foot = mean(Seafood_Sales_per_Foot, na.rm = TRUE),
@@ -794,21 +794,21 @@ seafood_efficiency <- efficiency_summary %>%
   )
 
 cat("=== MEAT DEPARTMENT EFFICIENCY BY BLOCK LENGTH ===\n")
-meat_efficiency %>%
+meat_efficiency |>
   mutate(
     Avg_Sales_per_Foot = dollar(Avg_Sales_per_Foot),
     Avg_Shrink_Pct = percent(Avg_Shrink_Pct, 0.01),
     High_Performer_Rate = percent(High_Performer_Rate, 0.1)
-  ) %>%
+  ) |>
   kable()
 
 cat("\n=== SEAFOOD DEPARTMENT EFFICIENCY BY BLOCK LENGTH ===\n")
-seafood_efficiency %>%
+seafood_efficiency |>
   mutate(
     Avg_Sales_per_Foot = dollar(Avg_Sales_per_Foot),
     Avg_Shrink_Pct = percent(Avg_Shrink_Pct, 0.01),
     High_Performer_Rate = percent(High_Performer_Rate, 0.1)
-  ) %>%
+  ) |>
   kable()
 
 ```
@@ -1011,7 +1011,7 @@ final_recommendations <- butcher_recommendations |>
     Meat_Recommendation, Seafood_Recommendation,
     # Impact
     Total_Cost_Change, Total_Sales_Impact, Weekly_ROI, Priority_Score
-  ) %>%
+  ) |>
   arrange(desc(Priority_Score), desc(abs(Total_Cost_Change)))
 
 
