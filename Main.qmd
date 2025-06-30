@@ -638,9 +638,9 @@ MAX_MEAT_LENGTH <- 16        # maximum practical length
 MAX_SEAFOOD_LENGTH <- 20     # maximum practical length
 ADJUSTMENT_INCREMENT <- 2    # adjust in 2-foot increments
 
-# Cost parameters (adjust based on your business)
-COST_PER_FOOT_MEAT <- 150    # monthly cost per foot of butcher block
-COST_PER_FOOT_SEAFOOD <- 200 # seafood blocks typically more expensive
+#Cost parameters
+COST_PER_FOOT_MEAT <- 150    
+COST_PER_FOOT_SEAFOOD <- 200 
 ```
 
 ## Data Preparations
@@ -696,7 +696,7 @@ butcher_data <- data %>%
   )
 
 # Add performance categories from previous analysis
-butcher_data <- butcher_data %>%
+butcher_data <- butcher_data |>
   mutate(
     meat_performance = case_when(
       `Meat Sales` > 1800 & `Meat Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
@@ -820,7 +820,7 @@ seafood_efficiency %>%
 create_butcher_block_recommendations <- function(data) {
   
   # Calculate optimal lengths based on performance and efficiency
-  recommendations <- data %>%
+  recommendations <- data |>
     mutate(
       # Meat recommendations - ONLY for unprofitable stores
       Meat_Optimal_Length = case_when(
@@ -841,7 +841,7 @@ create_butcher_block_recommendations <- function(data) {
         # All other stores: keep current length (High and Medium performers)
         TRUE ~ `Seafood Butcher Block`
       )
-    ) %>%
+    ) |>
     mutate(
       # Calculate changes
       Meat_Length_Change = Meat_Optimal_Length - `Meat Butcher Block`,
@@ -906,7 +906,7 @@ create_butcher_block_recommendations <- function(data) {
 butcher_recommendations <- create_butcher_block_recommendations(butcher_data)
 
 # Summary of recommendations
-recommendation_summary <- butcher_recommendations %>%
+recommendation_summary <- butcher_recommendations |>
   summarise(
     Total_Stores = n(),
     Stores_with_Changes = sum(Meat_Length_Change != 0 | Seafood_Length_Change != 0),
@@ -928,25 +928,25 @@ print(recommendation_summary)
 ## Recommendations
 
 ```{r top-recommendations}
-high_impact_recommendations <- butcher_recommendations %>%
-  filter(Priority_Score %in% c("HIGH", "MEDIUM")) %>%
+high_impact_recommendations <- butcher_recommendations |>
+  filter(Priority_Score %in% c("HIGH", "MEDIUM")) |>
   select(
     `Store ID`, Division, Banner,
     meat_performance, seafood_performance,
     `Meat Butcher Block`, Meat_Optimal_Length, Meat_Recommendation,
     `Seafood Butcher Block`, Seafood_Optimal_Length, Seafood_Recommendation,
     Total_Cost_Change, Total_Sales_Impact, Weekly_ROI, Priority_Score
-  ) %>%
+  ) |>
   arrange(desc(Priority_Score), desc(abs(Total_Cost_Change)))
 
 cat("\n=== TOP PRIORITY BUTCHER BLOCK RECOMMENDATIONS ===\n")
-high_impact_recommendations %>%
-  head(15) %>%
+high_impact_recommendations |>
+  head(15) |>
   mutate(
     Total_Cost_Change = dollar(Total_Cost_Change),
     Total_Sales_Impact = dollar(Total_Sales_Impact),
     Weekly_ROI = round(Weekly_ROI, 2)
-  ) %>%
+  ) |>
   kable()
 ```
 
