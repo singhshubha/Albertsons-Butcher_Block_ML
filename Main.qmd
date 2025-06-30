@@ -1,3 +1,632 @@
+---
+title: "Store Profitability ML Project Proposal"
+author: "Your Name"
+format:
+  html:
+    code-fold: true
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+---
+
+# Executive Summary
+
+This analysis develops machine learning models to:
+
+1.  **Predict shrink losses** before they occur
+2.  **Segment stores** into clear performance tiers
+3.  **Identify key drivers** of store profitability
+
+We use performance-based categorization with fixed thresholds to create actionable insights for store management.
+
+# Setup and Configuration
+
+```{r setup}
+#| include: false
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"
+)
+```
+
+```{r libraries}
+# Load required libraries
+library(tidyverse)      # Data manipulation and visualization
+library(tidymodels)     # Machine learning framework
+library(vip)            # Variable importance plots
+library(xgboost)        # Gradient boosting
+library(patchwork)      # Combine plots
+library(knitr)          # Tables
+library(scales)         # Number formatting
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(patchwork)
+
+# Set theme for plots
+theme_set(theme_minimal(base_size = 12))
+
+# Set seed for reproducibility
+set.seed(2024)
+
+# Define color palette
+store_colors <- c(
+  "High" = "#2E7D32",
+  "Medium" = "#1976D2", 
+  "Unprofitable" = "#C62828"
+)
+```
+
+# Data Import and Initial Processing
+
+```{r data-import}
+# Load the dataset
+data <- read_csv("~/Intern_proposal/sample data.csv") 
+
+# Create a data summary function
+summarize_data <- function(df, name) {
+  cat(name, "Department Summary:\n")
+  cat("- Total stores:", nrow(df), "\n")
+  cat("- Columns:", ncol(df), "\n")
+  cat("- Memory usage:", format(object.size(df), units = "MB"), "\n\n")
+}
+
+# Extract department-specific data
+meat_data <- data |>
+  select(
+    # Identifiers
+    `Store ID`, Division, `District #`, Banner, City, ST,
+    # Sales metrics
+    `Meat Sales`, `Total Sales`, 
+    # Shrink metrics
+    `Meat Shrink`, `Total Shrink`, `Meat Dept Shrink Pct`,
+    # Operational metrics
+    `Meat Markdown`, `Meat Markdown Quantity`, `Weekly Labor Hours`
+  )
+
+seafood_data <- data |>
+  select(
+    # Identifiers
+    `Store ID`, Division, `District #`, Banner, City, ST,
+    # Sales metrics
+    `Seafood Sales`, `Total Sales`,
+    # Shrink metrics
+    `Seafood Shrink`, `Total Shrink`, `Seafood Dept Shrink Pct`,
+    # Operational metrics
+    `Seafood Markdown`, `Seafood Markdown Quantity`, `Weekly Labor Hours`
+  )
+
+# Display summaries
+summarize_data(meat_data, "Meat")
+summarize_data(seafood_data, "Seafood")
+meat_data
+```
+
+# Data Cleaning and Feature Engineering
+
+## Convert to Weekly Metrics
+
+```{r}
+
+# Columns to keep as character
+character_cols <- c("Store ID", "Division", "District #", "Banner", "City", "ST")
+
+# Clean MEAT department data
+meat_data <- meat_data |>
+  # Convert annual metrics to weekly
+  mutate(across(
+    contains(c("Sales", "Shrink", "Markdown")),
+    ~ . / 52,
+    .names = "{.col}"
+  )) |>
+  # Convert all other columns (except character columns) to numeric
+  mutate(across(
+    .cols = -any_of(character_cols),
+    .fns = ~ as.numeric(.)
+  )) |>
+  # Remove rows with missing key fields
+  filter(
+    !is.na(`Meat Sales`),
+    !is.na(`Meat Dept Shrink Pct`),
+    !is.na(`Weekly Labor Hours`)
+  )
+
+# Clean SEAFOOD department data
+seafood_data <- seafood_data |>
+  mutate(across(
+    contains(c("Sales", "Shrink", "Markdown")),
+    ~ . / 52,
+    .names = "{.col}"
+  )) |>
+  mutate(across(
+    .cols = -any_of(character_cols),
+    .fns = ~ as.numeric(.)
+  )) |>
+  filter(
+    !is.na(`Seafood Sales`),
+    !is.na(`Seafood Dept Shrink Pct`),
+    !is.na(`Weekly Labor Hours`)
+  )
+
+meat_data
+
+```
+
+## Create Performance Categories
+
+```{r}
+#CREATE PERFORMANCE CATEGORIES USING FIXED BUSINESS RULES
+
+# For Meat Department
+meat_data <- meat_data |>
+  mutate(performance_category = case_when(
+    `Meat Sales` > 1800 & `Meat Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
+    `Meat Sales` > 1500 & `Meat Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
+    TRUE ~ "Unprofitable"
+  ))
+
+# For Seafood Department
+seafood_data <- seafood_data |>
+  mutate(performance_category = case_when(
+    `Seafood Sales` > 2000 & `Seafood Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
+    `Seafood Sales` > 1850 & `Seafood Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
+    TRUE ~ "Unprofitable"
+  ))
+
+# === SAVE performance_category variable for later use ===
+meat_performance_category <- meat_data$performance_category
+seafood_performance_category <- seafood_data$performance_category
+
+# Combine into one frame (optional)
+performance_categories <- meat_data |>
+  select(`Store ID`) |>
+  mutate(
+    Meat_Performance_Category = meat_performance_category,
+    Seafood_Performance_Category = seafood_performance_category
+  )
+
+
+# Print distributions
+cat("\nMeat Performance Distribution:\n")
+print(table(meat_performance_category))
+
+cat("\nSeafood Performance Distribution:\n")
+print(table(seafood_performance_category))
+performance_categories
+```
+
+\
+
+# Exploratory Data Analysis
+
+## Performance Category Visualization
+
+```{r}
+# Meat department plot
+meat_counts <- meat_data |>
+  count(performance_category) |>
+  mutate(
+    pct = n / sum(n),
+    label = paste0(n, "\n", percent(pct, 0.1))
+  )
+
+p1 <- ggplot(meat_counts, aes(x = performance_category, y = n, fill = performance_category)) +
+  geom_col(alpha = 0.9) +
+  geom_text(aes(label = label), vjust = 1.5, color = "white", 
+            fontface = "bold", size = 4) +
+  scale_fill_manual(values = store_colors) +
+  labs(
+    title = "Meat Department Performance Distribution",
+    x = NULL,
+    y = "Number of Stores"
+  ) +
+  theme(legend.position = "none")
+
+# Seafood department plot
+seafood_counts <- seafood_data |>
+  count(performance_category) |>
+  mutate(
+    pct = n / sum(n),
+    label = paste0(n, "\n", percent(pct, 0.1))
+  )
+
+p2 <- ggplot(seafood_counts, aes(x = performance_category, y = n, fill = performance_category)) +
+  geom_col(alpha = 0.9) +
+  geom_text(aes(label = label), vjust = 1.5, color = "white", 
+            fontface = "bold", size = 4) +
+  scale_fill_manual(values = store_colors) +
+  labs(
+    title = "Seafood Department Performance Distribution",
+    x = NULL,
+    y = "Number of Stores"
+  ) +
+  theme(legend.position = "none")
+
+# Combine plots
+p1 / p2
+
+```
+
+## Key Metrics by Performance Tier
+
+```{r metrics-by-tier}
+#| fig-height: 10
+
+# Create metric comparison plots
+create_metric_plots <- function(df, sales_col, shrink_col) {
+  p1 <- ggplot(df, aes(x = performance_category, y = get(sales_col), 
+                       fill = performance_category)) +
+    geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+    scale_fill_manual(values = store_colors) +
+    scale_y_continuous(labels = dollar) +
+    labs(x = NULL, y = "Weekly Sales", title = "Sales Distribution") +
+    theme(legend.position = "none")
+  
+  p2 <- ggplot(df, aes(x = performance_category, y = get(shrink_col), 
+                       fill = performance_category)) +
+    geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+    scale_fill_manual(values = store_colors) +
+    scale_y_continuous(labels = percent) +
+    labs(x = NULL, y = "Shrink %", title = "Shrink Distribution") +
+    theme(legend.position = "none")
+  
+  p3 <- ggplot(df, aes(x = performance_category, y = `Weekly Labor Hours`, 
+                       fill = performance_category)) +
+    geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+    scale_fill_manual(values = store_colors) +
+    labs(x = NULL, y = "Labor Hours", title = "Labor Distribution") +
+    theme(legend.position = "none")
+  
+  (p1 | p2 | p3)
+}
+
+create_metric_plots(meat_data, "Meat Sales", "Meat Dept Shrink Pct")
+```
+
+## Performance Scatter Analysis
+
+```{r scatter-analysis}
+#| fig-height: 8
+
+# Create performance scatter plot
+create_performance_scatter <- function(df, sales_col, shrink_col, dept) {
+  # Calculate sales per labor hour
+  df <- df |>
+    mutate(Sales_per_Hour = get(sales_col) / `Weekly Labor Hours`)
+  
+  p1 <- ggplot(df, aes(x = get(sales_col), y = get(shrink_col), 
+                       color = performance_category)) +
+    geom_point(aes(size = `Weekly Labor Hours`), alpha = 0.7) +
+    scale_color_manual(values = store_colors) +
+    scale_x_continuous(labels = dollar) +
+    scale_y_continuous(labels = percent) +
+    scale_size_continuous(range = c(2, 8)) +
+    labs(
+      x = "Weekly Sales",
+      y = "Shrink %",
+      title = paste(dept, "Department: Sales vs Shrink"),
+      subtitle = "Bubble size represents labor hours",
+      color = "Performance Tier",
+      size = "Labor Hours"
+    ) +
+    theme(legend.position = "right")
+  
+  p2 <- ggplot(df, aes(x = Sales_per_Hour, y = get(shrink_col), 
+                       color = performance_category)) +
+    geom_point(size = 3, alpha = 0.7) +
+    scale_color_manual(values = store_colors) +
+    scale_x_continuous(labels = dollar) +
+    scale_y_continuous(labels = percent) +
+    labs(
+      x = "Sales per Labor Hour",
+      y = "Shrink %",
+      title = paste(dept, "Department: Efficiency vs Shrink"),
+      color = "Performance Tier"
+    ) +
+    theme(legend.position = "right")
+  
+  p1 / p2
+}
+
+create_performance_scatter(meat_data, "Meat Sales", "Meat Dept Shrink Pct", "Meat")
+```
+
+# Machine Learning Models
+
+## Model 1: Shrink Prediction
+
+```{r shrink-model}
+
+
+# Prepare data for shrink prediction
+shrink_modeling_data <- meat_data |>
+  select(
+    # Target
+    `Meat Shrink`,`Store ID`,
+    `Meat Sales`, `Meat Markdown`, `Meat Markdown Quantity`,
+    `Weekly Labor Hours`, Division, Banner, ST, performance_category
+  ) |>
+  drop_na() |>
+  mutate(performance_category = as.factor(performance_category))
+
+# Create data splits
+set.seed(2024)
+shrink_split <- initial_split(shrink_modeling_data, prop = 0.75, strata = Division)
+shrink_train <- training(shrink_split)
+shrink_test <- testing(shrink_split)
+
+# Create preprocessing recipe
+shrink_recipe <- recipe(`Meat Shrink` ~ ., data = shrink_train) |>
+  step_novel(all_nominal_predictors()) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv(all_predictors()) |>
+  step_normalize(all_numeric_predictors())
+
+# Define model specification
+xgb_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  min_n = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune(),
+  learn_rate = 0.01
+) |>
+  set_engine("xgboost", nthread = 4) |>
+  set_mode("regression")
+
+# Create workflow
+shrink_workflow <- workflow() |>
+  add_recipe(shrink_recipe) |>
+  add_model(xgb_spec)
+
+# Define tuning grid
+xgb_grid <- grid_latin_hypercube(
+  tree_depth(range = c(3, 10)),
+  min_n(range = c(5, 50)),
+  loss_reduction(range = c(-10, 1.5), trans = log10_trans()),
+  sample_size(range = c(0, 1)),
+  mtry(range = c(3, 7)),
+  size = 30
+)
+
+# Create resamples
+shrink_folds <- vfold_cv(shrink_train, v = 5, strata = Division)
+
+# Tune model
+doParallel::registerDoParallel(cores = 4)
+
+shrink_tune_results <- tune_grid(
+  shrink_workflow,
+  resamples = shrink_folds,
+  grid = xgb_grid,
+  metrics = metric_set(rmse, rsq, mae),
+  control = control_grid(verbose = FALSE, save_pred = TRUE)
+)
+
+# Select best model
+best_shrink <- select_best(shrink_tune_results, metric = "rmse")
+
+# Finalize workflow
+final_shrink_workflow <- finalize_workflow(shrink_workflow, best_shrink)
+
+# Train final model
+final_shrink_fit <- final_shrink_workflow |>
+  fit(data = shrink_train)
+
+# Make predictions
+shrink_predictions <- predict(final_shrink_fit, shrink_test) |>
+  bind_cols(shrink_test)
+
+
+
+
+metrics <- metric_set(rmse, rsq, mae)
+# Calculate metrics
+shrink_metrics <- shrink_predictions |>
+  metrics(truth = `Meat Shrink`, estimate = .pred)
+
+# Display results
+cat("=== SHRINK PREDICTION MODEL PERFORMANCE ===\n")
+shrink_metrics |>
+  mutate(
+    .estimate = case_when(
+      .metric == "rmse" ~ dollar(.estimate),
+      .metric == "mae" ~ dollar(.estimate),
+      TRUE ~ as.character(round(.estimate, 3))
+    )
+  ) |>
+  kable(col.names = c("Metric", "Estimator", "Value"))
+
+
+# View actual vs predicted shrink values for the test set
+shrink_predictions |> 
+  select(`Store ID`, `Meat Shrink`, .pred, performance_category) |> 
+  arrange(desc(`Meat Shrink`)) |> 
+  head(10)
+
+
+# Plot actual vs predicted
+ggplot(shrink_predictions, aes(x = `Meat Shrink`, y = .pred)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(linetype = "dashed", color = "red") +
+  labs(
+    title = "Actual vs Predicted Meat Shrink",
+    x = "Actual Shrink",
+    y = "Predicted Shrink"
+  ) +
+  theme_minimal()
+
+```
+
+\
+
+## Model 2: Performance Classification
+
+```{r classification-model}
+# Prepare classification data
+class_modeling_data <- meat_data |>
+  select(
+    # Target
+    performance_category,
+    # Features
+    `Meat Sales`, `Meat Shrink`, `Meat Dept Shrink Pct`,
+    `Meat Markdown`, `Meat Markdown Quantity`,
+    `Weekly Labor Hours`, Division, Banner, ST
+  ) |>
+  drop_na()  |>
+  mutate(performance_category = as.factor(performance_category))
+
+# Create splits
+set.seed(2024)
+class_split <- initial_split(class_modeling_data, prop = 0.75, 
+                            strata = performance_category)
+class_train <- training(class_split)
+class_test <- testing(class_split)
+
+# Create recipe
+class_recipe <- recipe(performance_category ~ ., data = class_train) |>
+  step_novel(all_nominal_predictors()) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv(all_predictors()) |>
+  step_normalize(all_numeric_predictors())
+
+# Define model
+xgb_class_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = 6,
+  min_n = 10,
+  loss_reduction = 0.01,
+  sample_size = 0.8,
+  mtry = 1,
+  learn_rate = 0.01
+) |>
+  set_engine("xgboost", nthread = 4) |>
+  set_mode("classification")
+
+# Create workflow
+class_workflow <- workflow() |>
+  add_recipe(class_recipe) |>
+  add_model(xgb_class_spec)
+
+# Train model
+class_fit <- class_workflow |>
+  fit(data = class_train)
+
+# Make predictions
+class_predictions <- predict(class_fit, class_test) |>
+  bind_cols(predict(class_fit, class_test, type = "prob")) |>
+  bind_cols(class_test)
+
+metrics <- metric_set(accuracy, recall)
+# Calculate metrics
+class_metrics <- class_predictions |>
+  metrics(truth = performance_category, estimate = .pred_class)
+
+# Confusion matrix
+conf_mat <- class_predictions |>
+  conf_mat(truth = performance_category, estimate = .pred_class)
+
+# Display results
+cat("\n=== CLASSIFICATION MODEL PERFORMANCE ===\n")
+class_metrics |>
+  filter(.metric %in% c("accuracy", "kap")) |>
+  mutate(.estimate = round(.estimate, 3)) |>
+  kable(col.names = c("Metric", "Estimator", "Value"))
+
+cat("\nConfusion Matrix:\n")
+print(conf_mat)
+```
+
+## Feature Importance Analysis
+
+```{r feature-importance}
+#| fig-height: 10
+
+# Extract feature importance for both models
+shrink_vip <- final_shrink_fit |>
+  extract_fit_parsnip() |>
+  vip(num_features = 10) +
+  labs(title = "Top 10 Features for Shrink Prediction") +
+  theme_minimal()
+
+class_vip <- class_fit |>
+  extract_fit_parsnip() |>
+  vip(num_features = 10) +
+  labs(title = "Top 10 Features for Performance Classification") +
+  theme_minimal()
+
+shrink_vip / class_vip
+```
+
+# Store Segmentation Analysis
+
+```{r segmentation}
+# Create detailed segments
+segmentation_data <- meat_data |>
+  mutate(
+    # Calculate efficiency metrics
+    Sales_per_Hour = `Meat Sales` / `Weekly Labor Hours`,
+    Shrink_to_Sales = `Meat Shrink` / `Meat Sales`,
+    Markdown_Rate = `Meat Markdown` / `Meat Sales`,
+    
+    # Create segments
+    Revenue_Segment = cut(
+      `Meat Sales`,
+      breaks = quantile(`Meat Sales`, probs = c(0, 0.33, 0.67, 1), na.rm = TRUE),
+      labels = c("Low Revenue", "Mid Revenue", "High Revenue"),
+      include.lowest = TRUE
+    ),
+    
+    Efficiency_Segment = cut(
+      Sales_per_Hour,
+      breaks = quantile(Sales_per_Hour, probs = c(0, 0.33, 0.67, 1), na.rm = TRUE),
+      labels = c("Low Efficiency", "Mid Efficiency", "High Efficiency"),
+      include.lowest = TRUE
+    ),
+    
+    Shrink_Control = cut(
+      `Meat Dept Shrink Pct`,
+      breaks = quantile(`Meat Dept Shrink Pct`, probs = c(0, 0.33, 0.67, 1), na.rm = TRUE),
+      labels = c("Good Control", "Average Control", "Poor Control"),
+      include.lowest = TRUE
+    )
+  )
+
+# Create segment summary
+segment_summary <- segmentation_data |>
+  group_by(Revenue_Segment, Shrink_Control) |>
+  summarise(
+    Store_Count = n(),
+    Avg_Sales = mean(`Meat Sales`),
+    Avg_Shrink_Pct = mean(`Meat Dept Shrink Pct`),
+    Avg_Efficiency = mean(Sales_per_Hour),
+    Performance_Distribution = list(table(performance_category)),
+    .groups = "drop"
+  ) |>
+  arrange(desc(Avg_Sales))
+
+# Display segment summary
+cat("=== STORE SEGMENTATION SUMMARY ===\n\n")
+segment_summary |>
+  select(-Performance_Distribution) |>
+  mutate(
+    Avg_Sales = dollar(Avg_Sales),
+    Avg_Shrink_Pct = percent(Avg_Shrink_Pct, 0.01),
+    Avg_Efficiency = dollar(Avg_Efficiency)
+  ) |>
+  kable(
+    col.names = c("Revenue", "Shrink Control", "Stores", "Avg Sales", 
+                  "Avg Shrink", "Sales/Hour"),
+    align = c("l", "l", "r", "r", "r", "r")
+  )
+```
+
+# Butcher Block Setup
 
 ```{r butcher-block-setup}
 # Define butcher block constraints and parameters
@@ -14,6 +643,8 @@ COST_PER_FOOT_MEAT <- 150    # monthly cost per foot of butcher block
 COST_PER_FOOT_SEAFOOD <- 200 # seafood blocks typically more expensive
 ```
 
+## Data Preparations
+
 ```{r butcher-block-data-prep}
 # Prepare butcher block analysis data
 butcher_data <- data %>%
@@ -25,7 +656,7 @@ butcher_data <- data %>%
     # Shrink metrics
     `Meat Shrink`, `Seafood Shrink`, `Meat Dept Shrink Pct`, `Seafood Dept Shrink Pct`,
     # Butcher block lengths
-    `Meat Butcher Block Length`, `Seafood Butcher Block Length`,
+    `Meat Butcher Block`, `Seafood Butcher Block`,
     # Operational metrics
     `Meat Markdown`, `Seafood Markdown`, `Weekly Labor Hours`
   ) %>%
@@ -33,35 +664,35 @@ butcher_data <- data %>%
   mutate(
     across(contains(c("Sales", "Shrink", "Markdown")), ~ . / 52),
     # Clean butcher block lengths
-    `Meat Butcher Block Length` = as.numeric(`Meat Butcher Block Length`),
-    `Seafood Butcher Block Length` = as.numeric(`Seafood Butcher Block Length`)
+    `Meat Butcher Block` = as.numeric(`Meat Butcher Block`),
+    `Seafood Butcher Block` = as.numeric(`Seafood Butcher Block`)
   ) %>%
   # Filter out invalid data
   filter(
-    !is.na(`Meat Butcher Block Length`),
-    !is.na(`Seafood Butcher Block Length`),
-    `Meat Butcher Block Length` > 0,
-    `Seafood Butcher Block Length` > 0,
+    !is.na(`Meat Butcher Block`),
+    !is.na(`Seafood Butcher Block`),
+    `Meat Butcher Block` > 0,
+    `Seafood Butcher Block` > 0,
     !is.na(`Meat Sales`),
     !is.na(`Seafood Sales`)
   ) %>%
   # Calculate efficiency metrics
   mutate(
     # Sales per foot of butcher block
-    Meat_Sales_per_Foot = `Meat Sales` / `Meat Butcher Block Length`,
-    Seafood_Sales_per_Foot = `Seafood Sales` / `Seafood Butcher Block Length`,
+    Meat_Sales_per_Foot = `Meat Sales` / `Meat Butcher Block`,
+    Seafood_Sales_per_Foot = `Seafood Sales` / `Seafood Butcher Block`,
     
     # Shrink per foot
-    Meat_Shrink_per_Foot = `Meat Shrink` / `Meat Butcher Block Length`,
-    Seafood_Shrink_per_Foot = `Seafood Shrink` / `Seafood Butcher Block Length`,
+    Meat_Shrink_per_Foot = `Meat Shrink` / `Meat Butcher Block`,
+    Seafood_Shrink_per_Foot = `Seafood Shrink` / `Seafood Butcher Block`,
     
     # Efficiency ratios (compared to baseline)
     Meat_Length_Efficiency = Meat_Sales_per_Foot / (MEAT_BASELINE_LENGTH * 100),
     Seafood_Length_Efficiency = Seafood_Sales_per_Foot / (SEAFOOD_BASELINE_LENGTH * 100),
     
     # Current vs baseline
-    Meat_Length_vs_Baseline = `Meat Butcher Block Length` - MEAT_BASELINE_LENGTH,
-    Seafood_Length_vs_Baseline = `Seafood Butcher Block Length` - SEAFOOD_BASELINE_LENGTH
+    Meat_Length_vs_Baseline = `Meat Butcher Block` - MEAT_BASELINE_LENGTH,
+    Seafood_Length_vs_Baseline = `Seafood Butcher Block` - SEAFOOD_BASELINE_LENGTH
   )
 
 # Add performance categories from previous analysis
@@ -83,11 +714,13 @@ cat("Butcher Block Analysis Dataset prepared with", nrow(butcher_data), "stores\
 head(butcher_data)
 ```
 
+## Exploratory Data Analysis
+
 ```{r butcher-block-eda}
 # Exploratory analysis of butcher block utilization
 library(gridExtra)
 
-p1 <- ggplot(butcher_data, aes(x = `Meat Butcher Block Length`, y = Meat_Sales_per_Foot, 
+p1 <- ggplot(butcher_data, aes(x = `Meat Butcher Block`, y = Meat_Sales_per_Foot, 
                                color = meat_performance)) +
   geom_point(size = 3, alpha = 0.7) +
   geom_vline(xintercept = MEAT_BASELINE_LENGTH, linetype = "dashed", color = "red") +
@@ -101,7 +734,7 @@ p1 <- ggplot(butcher_data, aes(x = `Meat Butcher Block Length`, y = Meat_Sales_p
     subtitle = "Red line shows baseline length (8 ft)"
   )
 
-p2 <- ggplot(butcher_data, aes(x = `Seafood Butcher Block Length`, y = Seafood_Sales_per_Foot,
+p2 <- ggplot(butcher_data, aes(x = `Seafood Butcher Block`, y = Seafood_Sales_per_Foot,
                                color = seafood_performance)) +
   geom_point(size = 3, alpha = 0.7) +
   geom_vline(xintercept = SEAFOOD_BASELINE_LENGTH, linetype = "dashed", color = "red") +
@@ -118,17 +751,19 @@ p2 <- ggplot(butcher_data, aes(x = `Seafood Butcher Block Length`, y = Seafood_S
 grid.arrange(p1, p2, ncol = 1)
 ```
 
+## Calculate Efficiency
+
 ```{r efficiency-analysis}
 # Analyze efficiency patterns by current length
 efficiency_summary <- butcher_data %>%
   mutate(
     Meat_Length_Category = cut(
-      `Meat Butcher Block Length`,
+      `Meat Butcher Block`,
       breaks = c(0, 6, 8, 10, 12, Inf),
       labels = c("Very Short (≤6)", "Short (6-8)", "Baseline (8-10)", "Long (10-12)", "Very Long (>12)")
     ),
     Seafood_Length_Category = cut(
-      `Seafood Butcher Block Length`,
+      `Seafood Butcher Block`,
       breaks = c(0, 8, 12, 16, 20, Inf),
       labels = c("Very Short (≤8)", "Short (8-12)", "Baseline (12-16)", "Long (16-20)", "Very Long (>20)")
     )
@@ -175,7 +810,10 @@ seafood_efficiency %>%
     High_Performer_Rate = percent(High_Performer_Rate, 0.1)
   ) %>%
   kable()
+
 ```
+
+## Modelling
 
 ```{r optimization-model}
 # Create optimization model
@@ -184,70 +822,46 @@ create_butcher_block_recommendations <- function(data) {
   # Calculate optimal lengths based on performance and efficiency
   recommendations <- data %>%
     mutate(
-      # Meat recommendations
+      # Meat recommendations - ONLY for unprofitable stores
       Meat_Optimal_Length = case_when(
-        # High performers with low efficiency per foot - consider reducing
-        meat_performance == "High" & Meat_Sales_per_Foot < 200 & 
-        `Meat Butcher Block Length` > MEAT_BASELINE_LENGTH ~ 
-        pmax(MIN_MEAT_LENGTH, `Meat Butcher Block Length` - 2),
-        
-        # Medium performers - optimize based on current efficiency
-        meat_performance == "Medium" & Meat_Sales_per_Foot > 250 & 
-        `Meat Butcher Block Length` < MAX_MEAT_LENGTH ~ 
-        pmin(MAX_MEAT_LENGTH, `Meat Butcher Block Length` + 2),
-        
-        meat_performance == "Medium" & Meat_Sales_per_Foot < 180 & 
-        `Meat Butcher Block Length` > MIN_MEAT_LENGTH ~ 
-        pmax(MIN_MEAT_LENGTH, `Meat Butcher Block Length` - 2),
-        
-        # Unprofitable stores - usually reduce to minimum efficient size
-        meat_performance == "Unprofitable" & `Meat Butcher Block Length` > 6 ~ 
+        # Only make recommendations for unprofitable stores
+        meat_performance == "Unprofitable" & `Meat Butcher Block` > 6 ~ 
         pmax(MIN_MEAT_LENGTH, 6),
         
-        # Default: keep current length
-        TRUE ~ `Meat Butcher Block Length`
+        # All other stores: keep current length (High and Medium performers)
+        TRUE ~ `Meat Butcher Block`
       ),
       
-      # Seafood recommendations
+      # Seafood recommendations - ONLY for unprofitable stores
       Seafood_Optimal_Length = case_when(
-        # High performers with low efficiency per foot - consider reducing
-        seafood_performance == "High" & Seafood_Sales_per_Foot < 150 & 
-        `Seafood Butcher Block Length` > SEAFOOD_BASELINE_LENGTH ~ 
-        pmax(MIN_SEAFOOD_LENGTH, `Seafood Butcher Block Length` - 2),
-        
-        # Medium performers - optimize based on current efficiency
-        seafood_performance == "Medium" & Seafood_Sales_per_Foot > 200 & 
-        `Seafood Butcher Block Length` < MAX_SEAFOOD_LENGTH ~ 
-        pmin(MAX_SEAFOOD_LENGTH, `Seafood Butcher Block Length` + 2),
-        
-        seafood_performance == "Medium" & Seafood_Sales_per_Foot < 120 & 
-        `Seafood Butcher Block Length` > MIN_SEAFOOD_LENGTH ~ 
-        pmax(MIN_SEAFOOD_LENGTH, `Seafood Butcher Block Length` - 2),
-        
-        # Unprofitable stores - usually reduce to minimum efficient size
-        seafood_performance == "Unprofitable" & `Seafood Butcher Block Length` > 8 ~ 
+        # Only make recommendations for unprofitable stores
+        seafood_performance == "Unprofitable" & `Seafood Butcher Block` > 8 ~ 
         pmax(MIN_SEAFOOD_LENGTH, 8),
         
-        # Default: keep current length
-        TRUE ~ `Seafood Butcher Block Length`
+        # All other stores: keep current length (High and Medium performers)
+        TRUE ~ `Seafood Butcher Block`
       )
     ) %>%
     mutate(
       # Calculate changes
-      Meat_Length_Change = Meat_Optimal_Length - `Meat Butcher Block Length`,
-      Seafood_Length_Change = Seafood_Optimal_Length - `Seafood Butcher Block Length`,
+      Meat_Length_Change = Meat_Optimal_Length - `Meat Butcher Block`,
+      Seafood_Length_Change = Seafood_Optimal_Length - `Seafood Butcher Block`,
       
       # Create recommendation text
       Meat_Recommendation = case_when(
-        Meat_Length_Change > 0 ~ paste("INCREASE by", Meat_Length_Change, "feet"),
-        Meat_Length_Change < 0 ~ paste("DECREASE by", abs(Meat_Length_Change), "feet"),
-        TRUE ~ "MAINTAIN current length"
+        meat_performance == "Unprofitable" & Meat_Length_Change < 0 ~ 
+        paste("DECREASE by", abs(Meat_Length_Change), "feet"),
+        meat_performance == "Unprofitable" & Meat_Length_Change == 0 ~ 
+        "MAINTAIN current length",
+        TRUE ~ "No recommendations - Store performing well"
       ),
       
       Seafood_Recommendation = case_when(
-        Seafood_Length_Change > 0 ~ paste("INCREASE by", Seafood_Length_Change, "feet"),
-        Seafood_Length_Change < 0 ~ paste("DECREASE by", abs(Seafood_Length_Change), "feet"),
-        TRUE ~ "MAINTAIN current length"
+        seafood_performance == "Unprofitable" & Seafood_Length_Change < 0 ~ 
+        paste("DECREASE by", abs(Seafood_Length_Change), "feet"),
+        seafood_performance == "Unprofitable" & Seafood_Length_Change == 0 ~ 
+        "MAINTAIN current length", 
+        TRUE ~ "No recommendations - Store performing well"
       ),
       
       # Calculate cost impact (monthly)
@@ -273,10 +887,13 @@ create_butcher_block_recommendations <- function(data) {
       # ROI calculation (weekly sales impact vs monthly cost)
       Weekly_ROI = (Total_Sales_Impact * 4) / (abs(Total_Cost_Change) + 1), # +1 to avoid division by zero
       
-      # Priority score
+      # Priority score - only for unprofitable stores with changes
       Priority_Score = case_when(
-        abs(Total_Cost_Change) > 500 & Weekly_ROI > 2 ~ "HIGH",
-        abs(Total_Cost_Change) > 200 & Weekly_ROI > 1 ~ "MEDIUM",
+        (meat_performance == "Unprofitable" | seafood_performance == "Unprofitable") & 
+        abs(Total_Cost_Change) > 500 ~ "HIGH",
+        (meat_performance == "Unprofitable" | seafood_performance == "Unprofitable") & 
+        abs(Total_Cost_Change) > 200 ~ "MEDIUM",
+        (meat_performance == "Unprofitable" | seafood_performance == "Unprofitable") & 
         Total_Cost_Change != 0 ~ "LOW",
         TRUE ~ "NO CHANGE"
       )
@@ -305,17 +922,19 @@ recommendation_summary <- butcher_recommendations %>%
 
 cat("=== BUTCHER BLOCK OPTIMIZATION SUMMARY ===\n")
 print(recommendation_summary)
+
 ```
 
+## Recommendations
+
 ```{r top-recommendations}
-# Show top recommendations by priority and impact
 high_impact_recommendations <- butcher_recommendations %>%
   filter(Priority_Score %in% c("HIGH", "MEDIUM")) %>%
   select(
     `Store ID`, Division, Banner,
     meat_performance, seafood_performance,
-    `Meat Butcher Block Length`, Meat_Optimal_Length, Meat_Recommendation,
-    `Seafood Butcher Block Length`, Seafood_Optimal_Length, Seafood_Recommendation,
+    `Meat Butcher Block`, Meat_Optimal_Length, Meat_Recommendation,
+    `Seafood Butcher Block`, Seafood_Optimal_Length, Seafood_Recommendation,
     Total_Cost_Change, Total_Sales_Impact, Weekly_ROI, Priority_Score
   ) %>%
   arrange(desc(Priority_Score), desc(abs(Total_Cost_Change)))
@@ -331,8 +950,9 @@ high_impact_recommendations %>%
   kable()
 ```
 
+## EDA of Recommendations
+
 ```{r recommendation-visualization}
-# Visualize recommendations
 p1 <- ggplot(butcher_recommendations, aes(x = Meat_Length_Change, fill = meat_performance)) +
   geom_histogram(bins = 15, alpha = 0.7, position = "stack") +
   scale_fill_manual(values = store_colors) +
@@ -377,7 +997,7 @@ grid.arrange(p1, p2, p3, ncol = 1)
 
 ```{r export-recommendations}
 # Create final recommendation export
-final_recommendations <- butcher_recommendations %>%
+final_recommendations <- butcher_recommendations |>
   select(
     `Store ID`, Division, Banner, City, ST,
     # Current metrics
@@ -385,7 +1005,7 @@ final_recommendations <- butcher_recommendations %>%
     meat_performance, seafood_performance,
     Meat_Sales_per_Foot, Seafood_Sales_per_Foot,
     # Current lengths
-    `Meat Butcher Block Length`, `Seafood Butcher Block Length`,
+    `Meat Butcher Block`, `Seafood Butcher Block`,
     # Recommendations
     Meat_Optimal_Length, Seafood_Optimal_Length,
     Meat_Recommendation, Seafood_Recommendation,
@@ -394,13 +1014,11 @@ final_recommendations <- butcher_recommendations %>%
   ) %>%
   arrange(desc(Priority_Score), desc(abs(Total_Cost_Change)))
 
-# Save to CSV (uncomment if you want to export)
-# write_csv(final_recommendations, "butcher_block_recommendations.csv")
 
 cat("=== SAMPLE OF FINAL RECOMMENDATIONS ===\n")
-final_recommendations %>%
-  head(10) %>%
-  select(`Store ID`, Banner, Meat_Recommendation, Seafood_Recommendation, Priority_Score) %>%
+final_recommendations |>
+  head(10) |>
+  select(`Store ID`, Banner, Meat_Recommendation, Seafood_Recommendation, Priority_Score) |>
   kable()
 
 cat(paste("\nTotal stores analyzed:", nrow(final_recommendations)))
