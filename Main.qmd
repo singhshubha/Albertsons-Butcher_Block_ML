@@ -9,19 +9,21 @@ format:
     theme: cosmo
 ---
 
-# Executive Summary
+Executive Summary
 
 This analysis develops machine learning models to:
 
-1.  **Predict shrink losses** before they occur
-2.  **Segment stores** into clear performance tiers
-3.  **Identify key drivers** of store profitability
+Predict shrink losses before they occur
+
+Segment stores into clear performance tiers
+
+Identify key drivers of store profitability
 
 We use performance-based categorization with fixed thresholds to create actionable insights for store management.
 
-# Setup and Configuration
+Setup and Configuration
 
-```{r setup}
+{r setup}
 #| include: false
 
 knitr::opts_chunk$set(
@@ -30,9 +32,8 @@ knitr::opts_chunk$set(
   warning = FALSE,
   fig.align = "center"
 )
-```
 
-```{r libraries}
+{r libraries}
 # Load required libraries
 library(tidyverse)      # Data manipulation and visualization
 library(tidymodels)     # Machine learning framework
@@ -59,11 +60,10 @@ store_colors <- c(
   "Medium" = "#1976D2", 
   "Unprofitable" = "#C62828"
 )
-```
 
-# Data Import and Initial Processing
+Data Import and Initial Processing
 
-```{r data-import}
+{r data-import}
 # Load the dataset
 data <- read_csv("~/Intern_proposal/sample data.csv") 
 
@@ -104,13 +104,12 @@ seafood_data <- data |>
 summarize_data(meat_data, "Meat")
 summarize_data(seafood_data, "Seafood")
 meat_data
-```
 
-# Data Cleaning and Feature Engineering
+Data Cleaning and Feature Engineering
 
-## Convert to Weekly Metrics
+Convert to Weekly Metrics
 
-```{r}
+{r}
 
 # Columns to keep as character
 character_cols <- c("Store ID", "Division", "District #", "Banner", "City", "ST")
@@ -154,11 +153,10 @@ seafood_data <- seafood_data |>
 
 meat_data
 
-```
 
-## Create Performance Categories
+Create Performance Categories
 
-```{r}
+{r}
 #CREATE PERFORMANCE CATEGORIES USING FIXED BUSINESS RULES
 
 # For Meat Department
@@ -197,15 +195,14 @@ print(table(meat_performance_category))
 cat("\nSeafood Performance Distribution:\n")
 print(table(seafood_performance_category))
 performance_categories
-```
 
-\
 
-# Exploratory Data Analysis
 
-## Performance Category Visualization
+Exploratory Data Analysis
 
-```{r}
+Performance Category Visualization
+
+{r}
 # Meat department plot
 meat_counts <- meat_data |>
   count(performance_category) |>
@@ -249,11 +246,10 @@ p2 <- ggplot(seafood_counts, aes(x = performance_category, y = n, fill = perform
 # Combine plots
 p1 / p2
 
-```
 
-## Key Metrics by Performance Tier
+Key Metrics by Performance Tier
 
-```{r metrics-by-tier}
+{r metrics-by-tier}
 #| fig-height: 10
 
 # Create metric comparison plots
@@ -285,11 +281,10 @@ create_metric_plots <- function(df, sales_col, shrink_col) {
 }
 
 create_metric_plots(meat_data, "Meat Sales", "Meat Dept Shrink Pct")
-```
 
-## Performance Scatter Analysis
+Performance Scatter Analysis
 
-```{r scatter-analysis}
+{r scatter-analysis}
 #| fig-height: 8
 
 # Create performance scatter plot
@@ -333,26 +328,24 @@ create_performance_scatter <- function(df, sales_col, shrink_col, dept) {
 }
 
 create_performance_scatter(meat_data, "Meat Sales", "Meat Dept Shrink Pct", "Meat")
-```
 
-# Machine Learning Models
+Machine Learning Models
 
-## Model 1: Shrink Prediction
+Model 1: Shrink Prediction
 
-```{r shrink-model}
+{r shrink-model}
 
 
 # Prepare data for shrink prediction
 shrink_modeling_data <- meat_data |>
   select(
     # Target
-    `Meat Shrink`,
-    # Features
+    `Meat Shrink`,`Store ID`,
     `Meat Sales`, `Meat Markdown`, `Meat Markdown Quantity`,
-    `Weekly Labor Hours`, Division, Banner, ST
+    `Weekly Labor Hours`, Division, Banner, ST, performance_category
   ) |>
   drop_na() |>
-  mutate(meat_data$performance_category = as.factor(performance_category))
+  mutate(performance_category = as.factor(performance_category))
 
 # Create data splits
 set.seed(2024)
@@ -462,13 +455,12 @@ ggplot(shrink_predictions, aes(x = `Meat Shrink`, y = .pred)) +
   ) +
   theme_minimal()
 
-```
 
-\
 
-## Model 2: Performance Classification
 
-```{r classification-model}
+Model 2: Performance Classification
+
+{r classification-model}
 # Prepare classification data
 class_modeling_data <- meat_data |>
   select(
@@ -541,11 +533,10 @@ class_metrics |>
 
 cat("\nConfusion Matrix:\n")
 print(conf_mat)
-```
 
-## Feature Importance Analysis
+Feature Importance Analysis
 
-```{r feature-importance}
+{r feature-importance}
 #| fig-height: 10
 
 # Extract feature importance for both models
@@ -562,11 +553,10 @@ class_vip <- class_fit |>
   theme_minimal()
 
 shrink_vip / class_vip
-```
 
-# Store Segmentation Analysis
+Store Segmentation Analysis
 
-```{r segmentation}
+{r segmentation}
 # Create detailed segments
 segmentation_data <- meat_data |>
   mutate(
@@ -606,7 +596,7 @@ segment_summary <- segmentation_data |>
     Avg_Sales = mean(`Meat Sales`),
     Avg_Shrink_Pct = mean(`Meat Dept Shrink Pct`),
     Avg_Efficiency = mean(Sales_per_Hour),
-    Performance_Distribution = list(table(Performance_Category)),
+    Performance_Distribution = list(table(performance_category)),
     .groups = "drop"
   ) |>
   arrange(desc(Avg_Sales))
@@ -625,4 +615,4 @@ segment_summary |>
                   "Avg Shrink", "Sales/Hour"),
     align = c("l", "l", "r", "r", "r", "r")
   )
-```
+
