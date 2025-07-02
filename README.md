@@ -1,4 +1,4 @@
-```markdown
+```
 # 🧠 Store Profitability ML Project (Meat & Seafood Departments)
 
 This project applies machine learning and data analysis techniques to classify store performance, predict shrink, and extract actionable insights from operational data in the Meat and Seafood departments. The objective is to help identify improvement opportunities, reduce shrink losses, optimize labor and markdown strategy, and provide **data-driven butcher block optimization recommendations**.
