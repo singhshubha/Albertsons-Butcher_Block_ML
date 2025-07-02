@@ -123,20 +123,16 @@ meat_data
 # Columns to keep as character
 character_cols <- c("Store ID", "Division", "District #", "Banner", "City", "ST")
 
-# Clean MEAT department data
 meat_data <- meat_data |>
-  # Convert annual metrics to weekly
   mutate(across(
     contains(c("Sales", "Shrink", "Markdown")),
     ~ . / 52,
     .names = "{.col}"
   )) |>
-  # Convert all other columns (except character columns) to numeric
   mutate(across(
     .cols = -any_of(character_cols),
     .fns = ~ as.numeric(.)
   )) |>
-  # Remove rows with missing key fields
   filter(
     !is.na(`Meat Sales`),
     !is.na(`Meat Dept Shrink Pct`),
@@ -184,11 +180,9 @@ seafood_data <- seafood_data |>
     TRUE ~ "Unprofitable"
   ))
 
-# === SAVE performance_category variable for later use ===
 meat_performance_category <- meat_data$performance_category
 seafood_performance_category <- seafood_data$performance_category
 
-# Combine into one frame (optional)
 performance_categories <- meat_data |>
   select(`Store ID`) |>
   mutate(
@@ -196,8 +190,6 @@ performance_categories <- meat_data |>
     Seafood_Performance_Category = seafood_performance_category
   )
 
-
-# Print distributions
 cat("\nMeat Performance Distribution:\n")
 print(table(meat_performance_category))
 
@@ -430,8 +422,6 @@ shrink_predictions <- predict(final_shrink_fit, shrink_test) |>
   bind_cols(shrink_test)
 
 
-
-
 metrics <- metric_set(rmse, rsq, mae)
 # Calculate metrics
 shrink_metrics <- shrink_predictions |>
@@ -636,18 +626,22 @@ segment_summary |>
 # Butcher Block Setup
 
 ```{r butcher-block-setup}
-#Define butcher block constraints and parameters
-MEAT_BASELINE_LENGTH <- 8 
-SEAFOOD_BASELINE_LENGTH <- 12
-MIN_MEAT_LENGTH <- 4       
-MIN_SEAFOOD_LENGTH <- 6      
-MAX_MEAT_LENGTH <- 16        
-MAX_SEAFOOD_LENGTH <- 20     
-ADJUSTMENT_INCREMENT <- 2    # adjust in 2-foot increments
+MEAT_BASELINE_LENGTH <- 8     # Baseline: 2 blocks of 4ft each
+SEAFOOD_BASELINE_LENGTH <- 12 # Baseline: 3 blocks of 4ft each
+MIN_MEAT_LENGTH <- 4          # Minimum: 1 block of 4ft
+MIN_SEAFOOD_LENGTH <- 8       # Minimum: 2 blocks of 4ft (seafood cannot be less than 8ft)
+MAX_MEAT_LENGTH <- 16         # Maximum: 4 blocks of 4ft
+MAX_SEAFOOD_LENGTH <- 20      # Maximum: 5 blocks of 4ft
+BLOCK_SIZE <- 4               # Each block is 4 feet (blocks can only be removed in 4ft increments)
 
-#Cost parameters
-COST_PER_FOOT_MEAT <- 150    
-COST_PER_FOOT_SEAFOOD <- 200 
+# Cost parameters
+COST_PER_FOOT_MEAT <- 150     # Cost per foot for meat butcher block
+COST_PER_FOOT_SEAFOOD <- 200  # Cost per foot for seafood butcher block
+INSTALLATION_COST <- 500      # Fixed installation cost per modification
+
+# Shrinkage improvement factors (reduction in shrink % when downsizing)
+SHRINK_IMPROVEMENT_MEAT <- 0.002    # 0.2% improvement per 4ft block reduction
+SHRINK_IMPROVEMENT_SEAFOOD <- 0.0015 # 0.15% improvement per 4ft block reduction
 ```
 
 ## Data Preparations
@@ -656,16 +650,7 @@ COST_PER_FOOT_SEAFOOD <- 200
 # Prepare butcher block analysis data
 butcher_data <- data |>
   select(
-    # Identifiers
-    `Store ID`, Division, `District #`, Banner, City, ST,
-    # Sales metrics
-    `Meat Sales`, `Seafood Sales`, `Total Sales`,
-    # Shrink metrics
-    `Meat Shrink`, `Seafood Shrink`, `Meat Dept Shrink Pct`, `Seafood Dept Shrink Pct`,
-    # Butcher block lengths
-    `Meat Butcher Block`, `Seafood Butcher Block`,
-    # Operational metrics
-    `Meat Markdown`, `Seafood Markdown`, `Weekly Labor Hours`
+    `Store ID`, Division, `District #`, Banner, City, ST, `Meat Sales`, `Seafood Sales`, `Total Sales`,`Meat Shrink`, `Seafood Shrink`, `Meat Dept Shrink Pct`, `Seafood Dept Shrink Pct`, `Meat Butcher Block`, `Seafood Butcher Block`, `Meat Markdown`, `Seafood Markdown`, `Weekly Labor Hours`
   ) |>
   # Convert to weekly metrics
   mutate(
@@ -702,7 +687,6 @@ butcher_data <- data |>
     Seafood_Length_vs_Baseline = `Seafood Butcher Block` - SEAFOOD_BASELINE_LENGTH
   )
 
-# Add performance categories from previous analysis
 butcher_data <- butcher_data |>
   mutate(
     meat_performance = case_when(
@@ -718,14 +702,11 @@ butcher_data <- butcher_data |>
   )
 
 cat("Butcher Block Analysis Dataset prepared with", nrow(butcher_data), "stores\n")
-
 ```
 
 ## Exploratory Data Analysis
 
 ```{r butcher-block-eda}
-# Exploratory analysis of butcher block utilization
-
 
 p1 <- ggplot(butcher_data, aes(x = `Meat Butcher Block`, y = Meat_Sales_per_Foot, 
                                color = meat_performance)) +
@@ -761,7 +742,6 @@ grid.arrange(p1, p2, ncol = 1)
 ## Calculate Efficiency
 
 ```{r efficiency-analysis}
-# Analyze efficiency patterns by current length
 efficiency_summary <- butcher_data |>
   mutate(
     Meat_Length_Category = cut(
@@ -823,107 +803,121 @@ seafood_efficiency |>
 ## Modelling
 
 ```{r optimization-model}
-create_butcher_block_recommendations <- function(data) {
+create_enhanced_butcher_block_recommendations <- function(data) {
   recommendations <- data |>
     mutate(
-      # Define sales thresholds based on your performance categories
-      # From your analysis: High = Meat > 1800, Medium = Meat > 1500
-      sales_threshold_meat = 1500,    # Weekly sales threshold for meat
-      sales_threshold_seafood = 1850, # Weekly sales threshold for seafood
+      # Define sales thresholds based on performance categories
+      sales_threshold_meat = 1000,    # Weekly sales threshold for meat
+      sales_threshold_seafood = 1250, # Weekly sales threshold for seafood
       
       # Calculate performance percentage relative to sales threshold
       Meat_Performance_Pct = (`Meat Sales` - sales_threshold_meat) / sales_threshold_meat * 100,
       Seafood_Performance_Pct = (`Seafood Sales` - sales_threshold_seafood) / sales_threshold_seafood * 100,
       
-      # Dynamic meat length adjustment based on performance
-      Meat_Optimal_Length = case_when(
-        # If performance is 60% or more below threshold, reduce by 4ft
-        Meat_Performance_Pct <= -60 ~ pmax(`Meat Butcher Block` - 4, MIN_MEAT_LENGTH),
-        # If performance is 40-60% below threshold, reduce by 3ft
-        Meat_Performance_Pct <= -40 ~ pmax(`Meat Butcher Block` - 3, MIN_MEAT_LENGTH),
-        # If performance is 20-40% below threshold, reduce by 2ft
-        Meat_Performance_Pct <= -20 ~ pmax(`Meat Butcher Block` - 2, MIN_MEAT_LENGTH),
-        # If performance is 0-20% below threshold, reduce by 1ft
-        Meat_Performance_Pct < 0 ~ pmax(`Meat Butcher Block` - 1, MIN_MEAT_LENGTH),
-        
-        # If at or above threshold, no recommendations - store performing well
-        TRUE ~ `Meat Butcher Block`
+      # Calculate how many 4ft blocks to remove based on performance (only 4ft increments allowed)
+      Meat_Blocks_to_Remove = case_when(
+        Meat_Performance_Pct <= -60 ~ 2,  # Remove 2 blocks (8ft) if 60%+ below threshold
+        Meat_Performance_Pct <= -30 ~ 1,  # Remove 1 block (4ft) if 30-60% below threshold
+        TRUE ~ 0                          # No change otherwise (no recommendations for 1-3ft reductions)
       ),
       
-      # Dynamic seafood length adjustment based on performance
-      Seafood_Optimal_Length = case_when(
-        # If performance is 60% or more below threshold, reduce by 4ft
-        Seafood_Performance_Pct <= -60 ~ pmax(`Seafood Butcher Block` - 4, MIN_SEAFOOD_LENGTH),
-        # If performance is 40-60% below threshold, reduce by 3ft
-        Seafood_Performance_Pct <= -40 ~ pmax(`Seafood Butcher Block` - 3, MIN_SEAFOOD_LENGTH),
-        # If performance is 20-40% below threshold, reduce by 2ft
-        Seafood_Performance_Pct <= -20 ~ pmax(`Seafood Butcher Block` - 2, MIN_SEAFOOD_LENGTH),
-        # If performance is 0-20% below threshold, reduce by 1ft
-        Seafood_Performance_Pct < 0 ~ pmax(`Seafood Butcher Block` - 1, MIN_SEAFOOD_LENGTH),
-        
-        # If at or above threshold, no recommendations - store performing well
-        TRUE ~ `Seafood Butcher Block`
-      )
-    ) |>
-    mutate(
-      # Calculate changes
+      Seafood_Blocks_to_Remove = case_when(
+        Seafood_Performance_Pct <= -60 ~ 2,  # Remove 2 blocks (8ft) if 60%+ below threshold
+        Seafood_Performance_Pct <= -30 ~ 1,  # Remove 1 block (4ft) if 30-60% below threshold
+        TRUE ~ 0                             # No change otherwise (no recommendations for 1-3ft reductions)
+      ),
+      
+      # Calculate optimal lengths ensuring minimums are respected
+      Meat_Optimal_Length = pmax(
+        `Meat Butcher Block` - (Meat_Blocks_to_Remove * BLOCK_SIZE), 
+        MIN_MEAT_LENGTH
+      ),
+      
+      Seafood_Optimal_Length = pmax(
+        `Seafood Butcher Block` - (Seafood_Blocks_to_Remove * BLOCK_SIZE), 
+        MIN_SEAFOOD_LENGTH
+      ),
+      
+      # Calculate actual changes (accounting for minimum constraints)
       Meat_Length_Change = Meat_Optimal_Length - `Meat Butcher Block`,
       Seafood_Length_Change = Seafood_Optimal_Length - `Seafood Butcher Block`,
       
-      # Create recommendation text with performance context
+      # Calculate shrinkage improvements from downsizing (only when blocks are removed)
+      Meat_Shrink_Improvement = case_when(
+        Meat_Length_Change < 0 ~ abs(Meat_Length_Change) / BLOCK_SIZE * SHRINK_IMPROVEMENT_MEAT,
+        TRUE ~ 0
+      ),
+      
+      Seafood_Shrink_Improvement = case_when(
+        Seafood_Length_Change < 0 ~ abs(Seafood_Length_Change) / BLOCK_SIZE * SHRINK_IMPROVEMENT_SEAFOOD,
+        TRUE ~ 0
+      ),
+      
+      # New shrink percentages after optimization
+      New_Meat_Shrink_Pct = `Meat Dept Shrink Pct` - Meat_Shrink_Improvement,
+      New_Seafood_Shrink_Pct = `Seafood Dept Shrink Pct` - Seafood_Shrink_Improvement,
+      
+      # Calculate weekly shrink dollar savings
+      Weekly_Meat_Shrink_Savings = `Meat Sales` * Meat_Shrink_Improvement,
+      Weekly_Seafood_Shrink_Savings = `Seafood Sales` * Seafood_Shrink_Improvement,
+      Total_Weekly_Shrink_Savings = Weekly_Meat_Shrink_Savings + Weekly_Seafood_Shrink_Savings,
+      
+      # Calculate one-time setup costs (equipment + installation)
+      Meat_Setup_Cost = case_when(
+        Meat_Length_Change != 0 ~ abs(Meat_Length_Change) * COST_PER_FOOT_MEAT + INSTALLATION_COST,
+        TRUE ~ 0
+      ),
+      
+      Seafood_Setup_Cost = case_when(
+        Seafood_Length_Change != 0 ~ abs(Seafood_Length_Change) * COST_PER_FOOT_SEAFOOD + INSTALLATION_COST,
+        TRUE ~ 0
+      ),
+      
+      Total_Setup_Cost = Meat_Setup_Cost + Seafood_Setup_Cost,
+      
+      # Calculate payback period in weeks (how long to recoup the installation cost)
+      Payback_Weeks = case_when(
+        Total_Weekly_Shrink_Savings > 0 & Total_Setup_Cost > 0 ~ Total_Setup_Cost / Total_Weekly_Shrink_Savings,
+        Total_Setup_Cost == 0 ~ 0,
+        TRUE ~ Inf
+      ),
+      
+      # Calculate annual ROI based on shrinkage savings
+      Annual_ROI = case_when(
+        Total_Setup_Cost > 0 ~ ((Total_Weekly_Shrink_Savings * 52) / Total_Setup_Cost - 1) * 100,
+        TRUE ~ 0
+      ),
+      
+      # Create detailed recommendation text
       Meat_Recommendation = case_when(
         Meat_Length_Change < 0 ~ 
-        paste("DECREASE by", abs(Meat_Length_Change), "feet", 
-              "(Performance", round(abs(Meat_Performance_Pct), 1), "% below threshold)"),
-        Meat_Length_Change == 0 & Meat_Performance_Pct >= 0 ~ 
-        "No recommendations - Store performing well",
-        TRUE ~ "MAINTAIN current length"
+          paste("REMOVE", abs(Meat_Length_Change), "feet (", abs(Meat_Length_Change)/4, "blocks)",
+                "- Performance", round(abs(Meat_Performance_Pct), 1), "% below threshold"),
+        TRUE ~ "NO MODIFICATIONS"
       ),
       
       Seafood_Recommendation = case_when(
         Seafood_Length_Change < 0 ~ 
-        paste("DECREASE by", abs(Seafood_Length_Change), "feet", 
-              "(Performance", round(abs(Seafood_Performance_Pct), 1), "% below threshold)"),
-        Seafood_Length_Change == 0 & Seafood_Performance_Pct >= 0 ~ 
-        "No recommendations - Store performing well", 
-        TRUE ~ "MAINTAIN current length"
+          paste("REMOVE", abs(Seafood_Length_Change), "feet (", abs(Seafood_Length_Change)/4, "blocks)",
+                "- Performance", round(abs(Seafood_Performance_Pct), 1), "% below threshold"),
+        TRUE ~ "NO MODIFICATIONS"
       ),
       
-      # Calculate cost impact (monthly)
-      Meat_Cost_Change = Meat_Length_Change * COST_PER_FOOT_MEAT,
-      Seafood_Cost_Change = Seafood_Length_Change * COST_PER_FOOT_SEAFOOD,
-      Total_Cost_Change = Meat_Cost_Change + Seafood_Cost_Change,
-      
-      # Estimate sales impact based on performance
-      Estimated_Meat_Sales_Impact = case_when(
-        Meat_Length_Change > 0 ~ Meat_Length_Change * Meat_Sales_per_Foot * 
-          (1 + (Meat_Performance_Pct / 100) * 0.5), # Bonus for good performers
-        Meat_Length_Change < 0 ~ Meat_Length_Change * Meat_Sales_per_Foot,
-        TRUE ~ 0
+      # Shrinkage impact description
+      Shrinkage_Impact = case_when(
+        Meat_Shrink_Improvement > 0 | Seafood_Shrink_Improvement > 0 ~ 
+          paste("Shrink reduction: Meat", 
+                round(Meat_Shrink_Improvement * 100, 2), "%, Seafood", 
+                round(Seafood_Shrink_Improvement * 100, 2), "%",
+                "- Weekly savings:", dollar(Total_Weekly_Shrink_Savings)),
+        TRUE ~ "NO MODIFICATIONS - No shrinkage impact"
       ),
       
-      Estimated_Seafood_Sales_Impact = case_when(
-        Seafood_Length_Change > 0 ~ Seafood_Length_Change * Seafood_Sales_per_Foot * 
-          (1 + (Seafood_Performance_Pct / 100) * 0.5), # Bonus for good performers
-        Seafood_Length_Change < 0 ~ Seafood_Length_Change * Seafood_Sales_per_Foot,
-        TRUE ~ 0
-      ),
-      
-      Total_Sales_Impact = Estimated_Meat_Sales_Impact + Estimated_Seafood_Sales_Impact,
-      
-      # ROI calculation
-      Weekly_ROI = case_when(
-        abs(Total_Cost_Change) > 0 ~ (Total_Sales_Impact * 4) / abs(Total_Cost_Change),
-        TRUE ~ 0
-      ),
-      
-      # Priority score based on impact magnitude and performance gap
+      # Priority scoring based on payback period and savings magnitude
       Priority_Score = case_when(
-        (abs(Meat_Performance_Pct) >= 40 | abs(Seafood_Performance_Pct) >= 40) & 
-        abs(Total_Cost_Change) > 500 ~ "HIGH",
-        (abs(Meat_Performance_Pct) >= 20 | abs(Seafood_Performance_Pct) >= 20) & 
-        abs(Total_Cost_Change) > 200 ~ "MEDIUM",
-        abs(Total_Cost_Change) > 0 ~ "LOW",
+        Payback_Weeks <= 26 & Total_Weekly_Shrink_Savings >= 50 ~ "HIGH",      # Payback ≤ 6 months + significant savings
+        Payback_Weeks <= 52 & Total_Weekly_Shrink_Savings >= 25 ~ "MEDIUM",    # Payback ≤ 1 year + moderate savings
+        Total_Setup_Cost > 0 ~ "LOW",                                          # Has cost but longer payback
         TRUE ~ "NO CHANGE"
       ),
       
@@ -938,53 +932,51 @@ create_butcher_block_recommendations <- function(data) {
   return(recommendations)
 }
 
-# Generate recommendations
-butcher_recommendations <- create_butcher_block_recommendations(butcher_data)
+# Generate enhanced recommendations
+enhanced_recommendations <- create_enhanced_butcher_block_recommendations(butcher_data)
 
 # Enhanced summary with performance breakdowns
-recommendation_summary <- butcher_recommendations |>
+enhanced_summary <- enhanced_recommendations |>
+  filter(Priority_Score != "NO CHANGE") |>
   summarise(
-    Total_Stores = n(),
-    Stores_with_Changes = sum(Meat_Length_Change != 0 | Seafood_Length_Change != 0),
+    Total_Stores_with_Changes = n(),
     
-    # Meat adjustments
-    Meat_Increases = sum(Meat_Length_Change > 0),
-    Meat_Decreases = sum(Meat_Length_Change < 0),
-    Avg_Meat_Performance = round(mean(Meat_Performance_Pct, na.rm = TRUE), 1),
+    # Block removals (only 4ft increments)
+    Meat_Block_Removals = sum(Meat_Length_Change < 0),
+    Seafood_Block_Removals = sum(Seafood_Length_Change < 0),
     
-    # Seafood adjustments  
-    Seafood_Increases = sum(Seafood_Length_Change > 0),
-    Seafood_Decreases = sum(Seafood_Length_Change < 0),
-    Avg_Seafood_Performance = round(mean(Seafood_Performance_Pct, na.rm = TRUE), 1),
+    # Financial impact
+    Total_Setup_Investment = sum(Total_Setup_Cost),
+    Total_Weekly_Savings = sum(Total_Weekly_Shrink_Savings),
+    Total_Annual_Savings = sum(Total_Weekly_Shrink_Savings) * 52,
+    
+    # Payback metrics
+    Avg_Payback_Weeks = mean(Payback_Weeks[is.finite(Payback_Weeks)]),
+    Projects_Under_6_Months = sum(Payback_Weeks <= 26, na.rm = TRUE),
+    Projects_Under_1_Year = sum(Payback_Weeks <= 52, na.rm = TRUE),
     
     # Priority breakdown
     High_Priority = sum(Priority_Score == "HIGH"),
     Medium_Priority = sum(Priority_Score == "MEDIUM"),
     Low_Priority = sum(Priority_Score == "LOW"),
     
-    # Financial impact
-    Total_Cost_Impact = round(sum(Total_Cost_Change), 0),
-    Total_Sales_Impact = round(sum(Total_Sales_Impact), 0),
-    Net_Impact = round(sum(Total_Sales_Impact) + sum(Total_Cost_Change), 0),
-    
-    # Performance categories
-    High_Performers = sum(Overall_Performance == "High Performer"),
-    Stable_Performers = sum(Overall_Performance == "Stable Performer"),
-    Underperformers = sum(Overall_Performance == "Underperformer")
+    # Shrinkage improvements
+    Avg_Meat_Shrink_Improvement = mean(Meat_Shrink_Improvement[Meat_Shrink_Improvement > 0]) * 100,
+    Avg_Seafood_Shrink_Improvement = mean(Seafood_Shrink_Improvement[Seafood_Shrink_Improvement > 0]) * 100
   )
 
-cat("=== DYNAMIC BUTCHER BLOCK OPTIMIZATION SUMMARY ===\n")
-print(recommendation_summary)
+cat("=== ENHANCED BUTCHER BLOCK OPTIMIZATION SUMMARY ===\n")
+print(enhanced_summary)
 
 # Show stores with significant changes
-significant_changes <- butcher_recommendations |>
-  filter(abs(Meat_Length_Change) >= 2 | abs(Seafood_Length_Change) >= 2) |>
+significant_changes <- enhanced_recommendations |>
+  filter(abs(Meat_Length_Change) >= 4 | abs(Seafood_Length_Change) >= 4) |>
   select(`Store ID`, Meat_Performance_Pct, Seafood_Performance_Pct, 
          Meat_Recommendation, Seafood_Recommendation, 
-         Total_Cost_Change, Priority_Score)
+         Total_Setup_Cost, Payback_Weeks, Priority_Score)
 
 if(nrow(significant_changes) > 0) {
-  cat("\n=== STORES WITH SIGNIFICANT CHANGES (2+ feet) ===\n")
+  cat("\n=== STORES WITH BLOCK REMOVALS (4+ feet) ===\n")
   print(significant_changes)
 }
 ```
@@ -992,24 +984,26 @@ if(nrow(significant_changes) > 0) {
 ## Recommendations
 
 ```{r top-recommendations}
-high_impact_recommendations <- butcher_recommendations |>
+high_impact_recommendations <- enhanced_recommendations |>
   filter(Priority_Score %in% c("HIGH", "MEDIUM")) |>
   select(
     `Store ID`, Division, Banner,
     meat_performance, seafood_performance,
     `Meat Butcher Block`, Meat_Optimal_Length, Meat_Recommendation,
     `Seafood Butcher Block`, Seafood_Optimal_Length, Seafood_Recommendation,
-    Total_Cost_Change, Total_Sales_Impact, Weekly_ROI, Priority_Score
+    Total_Setup_Cost, Total_Weekly_Shrink_Savings, Payback_Weeks, Annual_ROI, 
+    Shrinkage_Impact, Priority_Score
   ) |>
-  arrange(desc(Priority_Score), desc(abs(Total_Cost_Change)))
+  arrange(Payback_Weeks, desc(Total_Weekly_Shrink_Savings))
 
 cat("\n=== TOP PRIORITY BUTCHER BLOCK RECOMMENDATIONS ===\n")
 high_impact_recommendations |>
   head(15) |>
   mutate(
-    Total_Cost_Change = dollar(Total_Cost_Change),
-    Total_Sales_Impact = dollar(Total_Sales_Impact),
-    Weekly_ROI = round(Weekly_ROI, 2)
+    Total_Setup_Cost = dollar(Total_Setup_Cost),
+    Total_Weekly_Shrink_Savings = dollar(Total_Weekly_Shrink_Savings),
+    Payback_Weeks = round(Payback_Weeks, 1),
+    Annual_ROI = paste0(round(Annual_ROI, 0), "%")
   ) |>
   kable()
 ```
@@ -1017,42 +1011,44 @@ high_impact_recommendations |>
 ## EDA of Recommendations
 
 ```{r recommendation-visualization}
-p1 <- ggplot(butcher_recommendations, aes(x = Meat_Length_Change, fill = meat_performance)) +
-  geom_histogram(bins = 15, alpha = 0.7, position = "stack") +
+p1 <- ggplot(enhanced_recommendations, aes(x = Meat_Length_Change, fill = meat_performance)) +
+  geom_histogram(bins = 10, alpha = 0.7, position = "stack") +
   scale_fill_manual(values = store_colors) +
+  scale_x_continuous(breaks = seq(-8, 8, 4)) +
   labs(
-    title = "Distribution of Meat Block Length Changes",
+    title = "Distribution of Meat Block Length Changes (4ft Increments Only)",
     x = "Recommended Length Change (feet)",
     y = "Number of Stores",
     fill = "Performance"
   ) +
   theme_minimal()
 
-p2 <- ggplot(butcher_recommendations, aes(x = Seafood_Length_Change, fill = seafood_performance)) +
-  geom_histogram(bins = 15, alpha = 0.7, position = "stack") +
+p2 <- ggplot(enhanced_recommendations, aes(x = Seafood_Length_Change, fill = seafood_performance)) +
+  geom_histogram(bins = 10, alpha = 0.7, position = "stack") +
   scale_fill_manual(values = store_colors) +
+  scale_x_continuous(breaks = seq(-8, 8, 4)) +
   labs(
-    title = "Distribution of Seafood Block Length Changes",
+    title = "Distribution of Seafood Block Length Changes (4ft Increments Only)",
     x = "Recommended Length Change (feet)",
     y = "Number of Stores",
     fill = "Performance"
   ) +
   theme_minimal()
 
-p3 <- ggplot(butcher_recommendations, aes(x = Total_Cost_Change, y = Total_Sales_Impact, 
-                                         color = Priority_Score, size = abs(Weekly_ROI))) +
+p3 <- ggplot(enhanced_recommendations |> filter(Priority_Score != "NO CHANGE"), 
+             aes(x = Total_Setup_Cost, y = Total_Weekly_Shrink_Savings, 
+                 color = Priority_Score, size = Payback_Weeks)) +
   geom_point(alpha = 0.7) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  geom_vline(xintercept = 0, linetype = "dashed") +
   scale_x_continuous(labels = dollar) +
   scale_y_continuous(labels = dollar) +
-  scale_color_manual(values = c("HIGH" = "red", "MEDIUM" = "orange", "LOW" = "yellow", "NO CHANGE" = "gray")) +
+  scale_color_manual(values = c("HIGH" = "red", "MEDIUM" = "orange", "LOW" = "yellow")) +
+  scale_size_continuous(range = c(2, 8), guide = guide_legend(title = "Payback\n(Weeks)")) +
   labs(
-    title = "Cost vs Sales Impact of Recommendations",
-    x = "Monthly Cost Change",
-    y = "Weekly Sales Impact",
+    title = "Setup Cost vs Weekly Savings from Shrink Reduction",
+    x = "One-time Setup Cost",
+    y = "Weekly Shrinkage Savings",
     color = "Priority",
-    size = "ROI"
+    subtitle = "Bubble size represents payback period in weeks"
   ) +
   theme_minimal()
 
@@ -1060,31 +1056,42 @@ grid.arrange(p1, p2, p3, ncol = 1)
 ```
 
 ```{r export-recommendations}
-final_recommendations <- butcher_recommendations |>
+final_enhanced_recommendations <- enhanced_recommendations |>
   select(
     `Store ID`, Division, Banner, City, ST,
     # Current metrics
     `Meat Sales`, `Seafood Sales`,
     meat_performance, seafood_performance,
     Meat_Sales_per_Foot, Seafood_Sales_per_Foot,
+    # Current shrinkage
+    `Meat Dept Shrink Pct`, `Seafood Dept Shrink Pct`,
     # Current lengths
     `Meat Butcher Block`, `Seafood Butcher Block`,
     # Recommendations
     Meat_Optimal_Length, Seafood_Optimal_Length,
     Meat_Recommendation, Seafood_Recommendation,
-    # Impact
-    Total_Cost_Change, Total_Sales_Impact, Weekly_ROI, Priority_Score
+    # Shrinkage impact
+    New_Meat_Shrink_Pct, New_Seafood_Shrink_Pct, Shrinkage_Impact,
+    # Financial analysis
+    Total_Setup_Cost, Total_Weekly_Shrink_Savings, Payback_Weeks, Annual_ROI, Priority_Score
   ) |>
-  arrange(desc(Priority_Score), desc(abs(Total_Cost_Change)))
+  arrange(desc(Priority_Score), Payback_Weeks) |>
+  filter(Priority_Score != "NO CHANGE")
 
-
-cat("=== SAMPLE OF FINAL RECOMMENDATIONS ===")
-final_recommendations |>
-  head(100) |>
-  select(`Store ID`, Banner, Meat_Recommendation, Seafood_Recommendation, Priority_Score) |>
+cat("=== SAMPLE OF ENHANCED FINAL RECOMMENDATIONS ===")
+final_enhanced_recommendations |>
+  head(20) |>
+  select(`Store ID`, Banner, Meat_Recommendation, Seafood_Recommendation, 
+         Shrinkage_Impact, Payback_Weeks, Annual_ROI, Priority_Score) |>
+  mutate(
+    Payback_Weeks = round(Payback_Weeks, 1),
+    Annual_ROI = paste0(round(Annual_ROI, 0), "%")
+  ) |>
   kable()
 
-cat(paste("\nTotal stores analyzed:", nrow(final_recommendations)))
-cat(paste("\nStores with recommended changes:", sum(final_recommendations$Priority_Score != "NO CHANGE")))
-cat(paste("\nHigh priority changes:", sum(final_recommendations$Priority_Score == "HIGH")))
+cat(paste("\nTotal stores analyzed:", nrow(butcher_data)))
+cat(paste("\nStores with recommended changes:", nrow(final_enhanced_recommendations)))
+cat(paste("\nHigh priority changes:", sum(final_enhanced_recommendations$Priority_Score == "HIGH")))
+cat(paste("\nTotal investment required:", dollar(sum(final_enhanced_recommendations$Total_Setup_Cost))))
+cat(paste("\nTotal annual savings potential:", dollar(sum(final_enhanced_recommendations$Total_Weekly_Shrink_Savings) * 52)))
 ```
