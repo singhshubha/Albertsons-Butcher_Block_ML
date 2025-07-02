@@ -167,16 +167,16 @@ meat_data
 # For Meat Department
 meat_data <- meat_data |>
   mutate(performance_category = case_when(
-    `Meat Sales` > 1800 & `Meat Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
-    `Meat Sales` > 1500 & `Meat Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
+    `Meat Sales` > 1600 & `Meat Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
+    `Meat Sales` > 1200 & `Meat Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
     TRUE ~ "Unprofitable"
   ))
 
 # For Seafood Department
 seafood_data <- seafood_data |>
   mutate(performance_category = case_when(
-    `Seafood Sales` > 2000 & `Seafood Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
-    `Seafood Sales` > 1850 & `Seafood Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
+    `Seafood Sales` > 1800 & `Seafood Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
+    `Seafood Sales` > 1450 & `Seafood Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
     TRUE ~ "Unprofitable"
   ))
 
@@ -690,13 +690,13 @@ butcher_data <- data |>
 butcher_data <- butcher_data |>
   mutate(
     meat_performance = case_when(
-      `Meat Sales` > 1800 & `Meat Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
-      `Meat Sales` > 1500 & `Meat Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
+      `Meat Sales` > 1600 & `Meat Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
+      `Meat Sales` > 1200 & `Meat Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
       TRUE ~ "Unprofitable"
     ),
     seafood_performance = case_when(
-      `Seafood Sales` > 2000 & `Seafood Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
-      `Seafood Sales` > 1850 & `Seafood Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
+      `Seafood Sales` > 1800 & `Seafood Dept Shrink Pct` < 0.04 & `Weekly Labor Hours` > 84 ~ "High",
+      `Seafood Sales` > 1450 & `Seafood Dept Shrink Pct` < 0.05 & `Weekly Labor Hours` >= 52 ~ "Medium",
       TRUE ~ "Unprofitable"
     )
   )
