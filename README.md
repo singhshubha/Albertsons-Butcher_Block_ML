@@ -116,28 +116,6 @@ This project applies machine learning and data analysis techniques to classify s
 
 ---
 
-## 🚀 Getting Started
-
-### Prerequisites
-```r
-# Required R packages
-install.packages(c(
-  "tidyverse", "tidymodels", "xgboost", 
-  "vip", "patchwork", "knitr", "scales"
-))
-```
-
-### Usage
-1. Clone the repository
-2. Load your data into `data/sample_data.csv`
-3. Run the analysis scripts in order:
-   - Data preprocessing
-   - ML model training
-   - Butcher block optimization
-4. Generate reports and visualizations
-
----
-
 ## 🎯 Current Status & Future Enhancements
 
 ### **Completed Components**
@@ -152,12 +130,6 @@ install.packages(c(
 🔄 Interactive dashboard development  
 🔄 Automated recommendation reporting  
 
-### **Future Enhancements**
-🔮 Real-time shrink monitoring integration  
-🔮 Seasonal demand forecasting  
-🔮 Multi-department optimization expansion  
-🔮 A/B testing framework for recommendation validation  
-
 ---
 
 ## 📊 Sample Results
@@ -169,28 +141,12 @@ install.packages(c(
 
 ---
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/enhancement`)
-3. Commit changes (`git commit -am 'Add enhancement'`)
-4. Push to branch (`git push origin feature/enhancement`)
-5. Create Pull Request
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
 ## 📧 Contact
 
 **Shubha S Singh**  
-- Email: [your.email@example.com]
-- LinkedIn: [your-linkedin-profile]
-- GitHub: [your-github-username]
+- Email: [shubhaswarnimsingh@gmail.com]
+- LinkedIn: [https://www.linkedin.com/in/shubhassingh/]
+- GitHub: [https://github.com/singhshubha]
 
 ---
 
